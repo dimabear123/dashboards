@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Movie Prediction Dashboard (Prototype) — Plain CSS</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6f8;
+    --card:#ffffff;
+    --muted:#6b7280;
+    --accent:#0ea5a3;
+    --text:#1f2937;
+    --muted-2:#475569;
+    --border:#e6eef3;
+    --shadow: none;
+  }
+  body { background:var(--bg); font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif; margin:0; padding:22px; color:var(--text); transition:background .2s,color .2s; }
+  h1{ margin:0 0 14px 0; font-weight:700; font-size:20px; }
+  .topbar { display:flex; align-items:center; gap:16px; margin-bottom:16px; }
+  .controls { display:flex; gap:12px; align-items:center; background:transparent; padding:0; }
+  .control-label { font-size:13px; color:var(--muted); margin-right:6px; }
+  select, input[type="date"] { padding:6px 9px; border-radius:8px; border:1px solid var(--border); background:white; font-size:13px; }
+  /* iOS-style switch */
+  .switch { position:relative; display:inline-block; width:52px; height:30px; }
+  .switch input { opacity:0; width:0; height:0; }
+  .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#e5e7eb; transition:.2s; border-radius:999px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.6); }
+  .slider:before { position:absolute; content:""; height:24px; width:24px; left:3px; bottom:3px; background:white; transition:.2s; border-radius:50%; box-shadow: 0 2px 6px rgba(2,6,23,0.12); }
+  input:checked + .slider { background:var(--accent); }
+  input:checked + .slider:before { transform: translateX(22px); }
+  .controls-right { margin-left:auto; display:flex; gap:12px; align-items:center; }
+
+  /* Metrics cards */
+  .metrics { display:flex; gap:14px; margin:16px 0 22px 0; }
+  .card { background:var(--card); border-radius:10px; padding:14px; flex:1; min-width:140px; border:1px solid var(--border); }
+  .card .label { color:var(--muted); font-size:13px; }
+  .card .value { font-size:24px; font-weight:700; margin-top:6px; color:var(--text); }
+
+  /* layout */
+  .row { display:flex; gap:16px; margin-bottom:18px; }
+  .col { background:var(--card); border-radius:10px; padding:14px; border:1px solid var(--border); flex:1; min-height:220px; }
+
+  /* Confusion matrix table */
+  .conf-container { padding:12px; }
+  table.conf-matrix { border-collapse:collapse; width:100%; font-size:13px; table-layout:fixed; }
+  table.conf-matrix th, table.conf-matrix td { padding:8px 6px; border:1px solid rgba(15,23,42,0.04); text-align:center; vertical-align:middle; word-wrap:break-word; }
+  table.conf-matrix th { background:#fbfdff; color:#334155; font-weight:600; }
+  table.conf-matrix td { min-width:48px; height:44px; border-radius:6px; }
+  table.conf-matrix td.zero { background:white; color:#6b7280; } /* zero = white */
+  table.conf-matrix td.gap { background:transparent; border:none; }
+  table.conf-matrix td.percent { background:#f8fafc; color:#111827; font-weight:700; }
+
+  /* table of records */
+  .records-controls { display:flex; gap:12px; align-items:center; margin-bottom:10px; }
+  #movieTable { width:100%; border-collapse:collapse; font-size:13px; margin-top:12px; }
+  #movieTable th, #movieTable td { padding:10px 8px; border-bottom:1px solid #eef2f7; text-align:left; vertical-align:top; }
+  #movieTable tr:hover { background:#f1f5f9; cursor:pointer; }
+  #movieTable td.summary-cell { max-width:500px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .summary { margin-top:12px; padding:12px; background:#fbfdff; border-radius:8px; display:none; }
+
+  /* pagination */
+  .pagination { display:flex; gap:8px; align-items:center; margin-top:12px; }
+  .page-btn { padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:white; cursor:pointer; }
+  .page-btn[disabled] { opacity:0.45; cursor:not-allowed; }
+
+  /* modal */
+  .modal-backdrop { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,6,23,0.45); z-index:2000; }
+  .modal {position: relative; background:var(--card); border-radius:10px; width:min(920px,95%); max-height:85vh; overflow:auto; padding:18px; border:1px solid var(--border); box-shadow: 0 8px 30px rgba(2,6,23,0.12); }
+  .modal h2{ margin:0 0 8px 0; font-size:18px; }
+  .modal .meta { color:var(--muted); font-size:13px; margin-bottom:12px; }
+  .close-btn { float:right; background:transparent; border:none; font-size:18px; cursor:pointer; color:var(--muted); }
+
+  /* disabled style for date pickers when AllDays on */
+  select[disabled], input[disabled] { opacity:0.5; }
+
+  /* small helper */
+  .muted { color:var(--muted); font-size:13px; }
+  .btn { padding:8px 12px; background:var(--accent); color:white; border-radius:8px; border:none; cursor:pointer; font-weight:600; }
+  .btn.secondary { background:#e6eef0; color:#0f1724; }
+
+
+
+  /* responsive */
+  @media (max-width:980px){
+    .metrics{ flex-direction:column; }
+    .row{ flex-direction:column; }
+    #movieTable td.summary-cell { max-width:240px; }
+  }
+
+
+
+/* Carousel-style tabs for classification */
+.tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #e6eef0;      /* default background */
+  color: #0f1724;           /* default text color */
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.25s ease, color 0.25s ease; /* smooth transition */
+}
+
+.tab.active {
+  background: var(--accent); /* dark teal accent for active */
+  color: white;
+}
+
+.tab:hover {
+  background: #cce7e5;  /* subtle highlight */
+  color: var(--text);
+}
+
+
+#modalMeta .field {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#modalMeta .label {
+  font-weight: bold;
+  min-width: 100px; /* keeps labels aligned */
+  text-align: right; /* optional, makes it look tidy */
+}
+
+#modalMeta .value {
+  flex: 1;
+  text-align: left;
+}
+
+
+
+
+
+</style>
+</head>
+<body>
+
+<h1>Movie Prediction Dashboard — Prototype</h1>
+
+<div id="classificationTabs" style="display:flex; gap:12px; margin-bottom:16px;">
+  <a href="genre.html" class="tab active">Genre</a>
+  <a href="tone.html" class="tab">Tone / Mood</a>
+  <a href="rating.html" class="tab">Ratings</a>
+</div>
+
+
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <label class="control-label">All Days</label>
+    <label class="switch" title="Toggle All Days">
+      <input id="allToggle" type="checkbox" />
+      <span class="slider"></span>
+    </label>
+    <div class="controls" style="margin-left:8px;">
+      <span class="control-label">From</span>
+      <select id="fromDate"></select>
+      <span class="control-label">To</span>
+      <select id="toDate"></select>
+    </div>
+  </div>
+
+
+</div>
+
+<div class="metrics" role="region" aria-label="Top metrics">
+  <div class="card" aria-hidden="false">
+    <div class="label">Accuracy</div>
+    <div class="value" id="accuracyVal">0%</div>
+  </div>
+  <div class="card">
+    <div class="label">Precision</div>
+    <div class="value" id="precisionVal">0%</div>
+  </div>
+  <div class="card">
+    <div class="label">Recall</div>
+    <div class="value" id="recallVal">0%</div>
+  </div>
+  <div class="card">
+    <div class="label">F1 Score</div>
+    <div class="value" id="f1Val">0%</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col" style="flex:1 1 520px;">
+    <div style="font-weight:700; margin-bottom:8px;">Confusion Matrix</div>
+    <div class="conf-container">
+      <div style="margin-bottom:8px; color:var(--muted-2); font-size:13px;">Cells show counts. Diagonal = correct (teal→green), off-diagonal = errors (blue→purple). White = zero.</div>
+      <table id="confTable" class="conf-matrix" aria-label="Confusion Matrix"></table>
+    </div>
+  </div>
+
+  <div class="col" style="flex:1 1 460px;">
+    <div style="font-weight:700; margin-bottom:8px;">Metrics Over Time</div>
+    <div id="trendChart" style="width:100%;height:360px;"></div>
+    <div style="margin-top:8px; color:var(--muted-2); font-size:13px;">If you choose a single day, the chart switches to a grouped bar view for that day.</div>
+  </div>
+</div>
+
+<div class="col" style="padding:14px; margin-bottom:28px;">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <div style="font-weight:700; margin-bottom:8px;">Movie Records</div>
+    <div>
+      <label class="muted" style="margin-right:8px;">Predicted</label>
+      <select id="predictedSelect">
+        <option value="">All</option>
+      </select>
+      <label class="muted" style="margin-left:12px; margin-right:8px;">Judge</label>
+      <select id="judgeSelect">
+        <option value="">All</option>
+      </select>
+      <button id="downloadBtn" class="btn" style="margin-left:14px;">Download CSV</button>
+    </div>
+  </div>
+
+  <table id="movieTable" aria-live="polite">
+    <thead>
+      <tr><th style="width:90px">Date</th><th style="width:120px">Movie ID</th><th>Script Summary</th><th style="width:120px">Predicted Genre</th><th style="width:120px">Judge Genre</th></tr>
+    </thead>
+    <tbody>
+      <!-- rows populated by JS -->
+    </tbody>
+  </table>
+
+  <div class="pagination" id="paginationControls" aria-hidden="false" style="justify-content:flex-end;">
+    <button id="prevPage" class="page-btn">Previous</button>
+    <div id="pageInfo" class="muted" style="padding:0 6px;">Page 1</div>
+    <button id="nextPage" class="page-btn">Next</button>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal" role="document">
+
+    <div id="modalStamp" style="
+        position:absolute;
+        top:18px;
+        right:18px;
+        color: rgba(220,20,60,0.8);
+        font-size: 32px;
+        font-weight: 700;
+        transform: rotate(-20deg);
+        border: 4px solid rgba(220,20,60,0.8);
+        padding: 12px 20px;
+        border-radius: 8px;
+        text-align: center;
+        pointer-events: none;
+        display: none; /* hide by default */
+    "></div> <!-- text removed -->
+
+    <button id="closeModal" class="close-btn" aria-label="Close">✖</button>
+    <h2 id="modalTitle">Record details</h2>
+    <div class="meta" id="modalMeta"></div>
+    <div id="modalBody" style="white-space:pre-wrap; line-height:1.45;"></div>
+  </div>
+</div>
+
+
+<script>
+/* ===========================
+   Embedded mock data
+   Columns: date, movie_id, summary, pred, judge, explanation_prediction, explanation_judge
+   =========================== */
+const allData = [
+  {
+    date: "2025-09-28",
+    movie_id: "ABC-12345",
+    script: "A tender rom-com about two mismatched bakers who unexpectedly fall in love while competing in a high-stakes pastry contest in a picturesque small town. Chaos ensues when family secrets come to light.",
+    pred: "Romance",
+    judge: "Romance",
+    explanation_prediction: "Predicted as Romance because the plot focuses on emotional connection, love, and relationship growth between the two bakers.",
+    explanation_judge: "Judge agrees this is Romance — strong focus on love, reconciliation, and emotional stakes typical of the genre."
+  },
+  {
+    date: "2025-09-29",
+    movie_id: "DEF-67890",
+    script: "A haunted house with family secrets that unravel as a group of friends spend the night, discovering hidden passages, ghostly apparitions, and a chilling past.",
+    pred: "Horror",
+    judge: "Horror",
+    explanation_prediction: "Predicted as Horror due to haunted setting, supernatural elements, and emphasis on fear and suspense.",
+    explanation_judge: "Judge confirms Horror — clear presence of ghosts and traditional haunted-house tropes."
+  },
+  {
+    date: "2025-09-30",
+    movie_id: "GHI-54321",
+    script: "Spy thriller with double-crosses, espionage missions across Europe, and a secret that could change the balance of power forever.",
+    pred: "Action",
+    judge: "Action",
+    explanation_prediction: "Predicted as Action because of fast-paced missions, danger, and high-stakes conflicts.",
+    explanation_judge: "Judge agrees — Action genre fits due to focus on missions and global stakes."
+  },
+  {
+    date: "2025-10-01",
+    movie_id: "JKL-98765",
+    script: "A quirky buddy comedy set on a road trip, featuring unlikely friends, bizarre encounters, and a series of escalating misadventures that test their friendship.",
+    pred: "Comedy",
+    judge: "Comedy",
+    explanation_prediction: "Predicted as Comedy given the emphasis on humorous interactions and absurd situations.",
+    explanation_judge: "Judge concurs — the plot centers on friendship and laughter, aligning with Comedy."
+  },
+  {
+    date: "2025-10-01",
+    movie_id: "MNO-11223",
+    script: "A love triangle complicates a small town as secrets, misunderstandings, and romantic confessions unfold during the annual town festival.",
+    pred: "Romance",
+    judge: "Comedy",
+    explanation_prediction: "Predicted as Romance due to multiple romantic relationships and emotional tension.",
+    explanation_judge: "Judge corrected to Comedy — tone and misunderstanding-driven scenes evoke humor more than emotion."
+  },
+  {
+    date: "2025-10-02",
+    movie_id: "PQR-33445",
+    script: "An experimental drama about memory, identity, and perception, following the fragmented life of an artist grappling with past traumas and shifting realities.",
+    pred: "Drama",
+    judge: "Drama",
+    explanation_prediction: "Predicted as Drama based on introspective tone and emotional conflict.",
+    explanation_judge: "Judge agrees — narrative complexity and internal struggle align with Drama conventions."
+  },
+  {
+    date: "2025-10-02",
+    movie_id: "STU-55667",
+    script: "A slasher targets influencers during a live-streamed challenge in an isolated mansion, blending social media commentary with classic horror tropes.",
+    pred: "Horror",
+    judge: "Horror",
+    explanation_prediction: "Predicted as Horror due to violence, tension, and suspenseful chase structure.",
+    explanation_judge: "Judge agrees — modern twist on slasher format clearly categorizes it as Horror."
+  },
+  {
+    date: "2025-10-03",
+    movie_id: "VWX-77889",
+    script: "A mispredicted romance that reads as horror, where romantic gestures go terrifyingly wrong in unexpected ways, leaving audiences unsure how to feel.",
+    pred: "Romance",
+    judge: "Horror",
+    explanation_prediction: "Predicted as Romance because the story begins with romantic framing and intent.",
+    explanation_judge: "Judge labeled as Horror — tone and atmosphere are dark and unsettling despite romantic premise."
+  },
+  {
+    date: "2025-10-03",
+    movie_id: "YZA-99001",
+    script: "Action-packed space rescue with interstellar battles, daring maneuvers, and a crew racing against time to save a colony from a catastrophic event.",
+    pred: "Action",
+    judge: "Action",
+    explanation_prediction: "Predicted as Action for its high energy, physical danger, and large-scale set pieces.",
+    explanation_judge: "Judge agrees — Action classification fits with focus on combat and heroism."
+  },
+  {
+    date: "2025-10-03",
+    movie_id: "BCD-22334",
+    script: "Dry British comedy about bureaucracy, featuring deadpan humor, absurd office politics, and characters navigating ridiculous procedures and paperwork.",
+    pred: "Comedy",
+    judge: "Comedy",
+    explanation_prediction: "Predicted as Comedy because humor arises from mundane and absurd bureaucratic situations.",
+    explanation_judge: "Judge agrees — tonal delivery and humor confirm Comedy."
+  },
+  {
+    date: "2025-10-01",
+    movie_id: "EFG-44556",
+    script: "Romantic montage gone wrong when a series of attempts to impress leads to hilarious misunderstandings and unexpected outcomes.",
+    pred: "Romance",
+    judge: "Romance",
+    explanation_prediction: "Predicted as Romance based on pursuit of love and relationship focus.",
+    explanation_judge: "Judge agrees — although comedic, core motivation remains romantic."
+  },
+  {
+    date: "2025-10-02",
+    movie_id: "HIJ-66778",
+    script: "Creepy doll subplot involving haunted toys, eerie whispers, and a chilling backstory that connects past and present victims.",
+    pred: "Horror",
+    judge: "Horror",
+    explanation_prediction: "Predicted as Horror given eerie tone and supernatural focus.",
+    explanation_judge: "Judge agrees — strong presence of fear and supernatural dread."
+  },
+  {
+    date: "2025-10-03",
+    movie_id: "KLM-88990",
+    script: "Courtroom drama with moral quandary, where the lawyer must balance justice with personal ethics while high-stakes cases challenge their principles.",
+    pred: "Drama",
+    judge: "Drama",
+    explanation_prediction: "Predicted as Drama because of moral conflicts and emotional depth.",
+    explanation_judge: "Judge agrees — structure and pacing consistent with courtroom Drama."
+  },
+  {
+    date: "2025-10-03",
+    movie_id: "NOP-11223",
+    script: "This is a long summary demo. ".repeat(60) + "End of long demo.",
+    pred: "Drama",
+    judge: "Drama",
+    explanation_prediction: "Predicted as Drama because the narrative tone suggests internal conflict and serious themes.",
+    explanation_judge: "Judge agrees — pacing and seriousness support Drama classification."
+  }
+];
+
+
+
+/* axis order */
+const axisOrder = ['Comedy','Romance','Horror','Action','Drama'];
+
+/* DOM references */
+const fromDate = document.getElementById('fromDate');
+const toDate = document.getElementById('toDate');
+const allToggle = document.getElementById('allToggle');
+const confTable = document.getElementById('confTable');
+const trendChartDiv = document.getElementById('trendChart');
+const predictedSelect = document.getElementById('predictedSelect');
+const judgeSelect = document.getElementById('judgeSelect');
+const movieTableBody = document.querySelector('#movieTable tbody');
+const accuracyVal = document.getElementById('accuracyVal');
+const precisionVal = document.getElementById('precisionVal');
+const recallVal = document.getElementById('recallVal');
+const f1Val = document.getElementById('f1Val');
+const pageInfo = document.getElementById('pageInfo');
+const prevPageBtn = document.getElementById('prevPage');
+const nextPageBtn = document.getElementById('nextPage');
+const modalBackdrop = document.getElementById('modalBackdrop');
+const modalTitle = document.getElementById('modalTitle');
+const modalMeta = document.getElementById('modalMeta');
+const modalBody = document.getElementById('modalBody');
+const closeModalBtn = document.getElementById('closeModal');
+const downloadBtn = document.getElementById('downloadBtn');
+
+/* pagination state */
+let currentPage = 1;
+const PAGE_SIZE = 10;
+
+/* Helpers: unique sorted dates */
+function uniqueSortedDates(data){
+  return [...new Set(data.map(d=>d.date))].sort();
+}
+
+/* populate date selectors */
+function populateDateSelectors(){
+  const dates = uniqueSortedDates(allData);
+  fromDate.innerHTML = ""; toDate.innerHTML = "";
+  dates.forEach(d=>{
+    const o1 = document.createElement('option'); o1.value=d; o1.textContent=d;
+    const o2 = document.createElement('option'); o2.value=d; o2.textContent=d;
+    fromDate.appendChild(o1); toDate.appendChild(o2);
+  });
+  if(dates.length){
+    fromDate.value = dates[0];
+    toDate.value = dates[dates.length-1];
+  }
+}
+populateDateSelectors();
+
+/* populate genre filters */
+function populateGenreFilters(){
+  const genres = axisOrder;
+  predictedSelect.innerHTML = '<option value="">All</option>';
+  judgeSelect.innerHTML = '<option value="">All</option>';
+  genres.forEach(g=>{
+    const opt1 = document.createElement('option'); opt1.value=g; opt1.textContent=g;
+    const opt2 = document.createElement('option'); opt2.value=g; opt2.textContent=g;
+    predictedSelect.appendChild(opt1); judgeSelect.appendChild(opt2);
+  });
+}
+populateGenreFilters();
+
+/* color helpers */
+function lerp(a,b,t){ return a + (b-a)*t; }
+function hslToCss(h,s,l){ return `hsl(${h} ${s}% ${l}%)`; }
+function cellColor(count, isDiag, maxCount){
+  if(!count || count<=0) return '#ffffff';
+  const t = Math.min(1, maxCount? (count/maxCount) : 1);
+  if(isDiag){
+    const h = lerp(170,145,t*0.9);
+    const s = lerp(60,72,t*1.0);
+    const l = lerp(55,40,t*0.9);
+    return hslToCss(h,s,l);
+  } else {
+    const h = lerp(215,265,t);
+    const s = lerp(60,75,t);
+    const l = lerp(57,45,t);
+    return hslToCss(h,s,l);
+  }
+}
+
+/* Filter data by UI (from/to, predicted/judge) */
+function getFilteredData(){
+  const f = fromDate.value;
+  const t = toDate.value;
+  const predFilter = predictedSelect.value;
+  const judgeFilter = judgeSelect.value;
+  return allData.filter(r=>{
+    if(r.date < f || r.date > t) return false;
+    if(predFilter && r.pred !== predFilter) return false;
+    if(judgeFilter && r.judge !== judgeFilter) return false;
+    return true;
+  });
+}
+
+/* Compute matrix & metrics */
+function computeMatrixAndMetrics(filtered){
+  const n = axisOrder.length;
+  const matrix = Array.from({length:n},()=>Array(n).fill(0));
+  let totalCorrect = 0;
+  const predCounts = {}; const actualCounts = {};
+  filtered.forEach(r=>{
+    const i = axisOrder.indexOf(r.judge);
+    const j = axisOrder.indexOf(r.pred);
+    if(i>=0 && j>=0){
+      matrix[i][j] += 1;
+      if(i===j) totalCorrect++;
+      predCounts[r.pred] = (predCounts[r.pred]||0) + 1;
+      actualCounts[r.judge] = (actualCounts[r.judge]||0) + 1;
+    }
+  });
+  const total = filtered.length;
+  const accuracy = total ? (totalCorrect/total) : 0;
+
+  let precisionSum=0, recallSum=0, labelCount=0;
+  axisOrder.forEach(label=>{
+    const idx = axisOrder.indexOf(label);
+    const tp = matrix[idx][idx] || 0;
+    const predTotal = predCounts[label] || 0;
+    const actTotal = actualCounts[label] || 0;
+    if(predTotal>0 || actTotal>0){
+      const prec = predTotal? (tp / predTotal) : 0;
+      const rec = actTotal? (tp / actTotal) : 0;
+      precisionSum += prec; recallSum += rec; labelCount++;
+    }
+  });
+  const precision = labelCount ? (precisionSum / labelCount) : 0;
+  const recall = labelCount ? (recallSum / labelCount) : 0;
+  const f1 = (precision + recall) ? (2 * precision * recall / (precision + recall)) : 0;
+
+  return {matrix, accuracy, precision, recall, f1, total};
+}
+
+/* Render confusion matrix */
+function renderConfMatrix(){
+  const filtered = getFilteredData();
+  const {matrix, accuracy, precision, recall, f1, total} = computeMatrixAndMetrics(filtered);
+
+  let maxCount = 0;
+  for(let i=0;i<matrix.length;i++) for(let j=0;j<matrix[0].length;j++) maxCount = Math.max(maxCount, matrix[i][j]);
+
+  let html = '<thead><tr><th></th>';
+  axisOrder.forEach(lbl => { html += `<th>${lbl}</th>`; });
+  html += '<th>% Correct</th></tr></thead><tbody>';
+
+  for(let i=0;i<axisOrder.length;i++){
+    const row = matrix[i];
+    const rowSum = row.reduce((a,b)=>a+b,0);
+    html += `<tr><th>${axisOrder[i]}</th>`;
+    for(let j=0;j<axisOrder.length;j++){
+      const c = row[j];
+      const isDiag = (i===j);
+      const bg = cellColor(c, isDiag, maxCount);
+      const cls = (c===0)?'zero':'';
+      const text = c>0? c : '';
+      html += `<td class="${cls}" style="background:${bg};">${text}</td>`;
+    }
+    const pct = rowSum? Math.round( (row[i] / rowSum) * 100 ) + '%' : '';
+    html += `<td class="percent">${pct}</td></tr>`;
+  }
+
+  html += `<tr><th class="gap"></th>`;
+  for(let i=0;i<axisOrder.length;i++) html += `<td class="gap"></td>`;
+  html += `<td class="gap"></td></tr>`;
+
+  const totalCorrect = matrix.reduce((sum,row,i)=> sum + row[i], 0);
+  const overallPct = total ? Math.round((totalCorrect/total)*100) + '%' : '';
+  html += `<tr><th>Overall % Correct</th>`;
+  for(let i=0;i<axisOrder.length;i++) html += `<td class="gap"></td>`;
+  html += `<td class="percent">${overallPct}</td></tr>`;
+
+  html += '</tbody>';
+  confTable.innerHTML = html;
+
+  // update top cards
+  accuracyVal.innerText = (accuracy*100).toFixed(1) + '%';
+  precisionVal.innerText = (precision*100).toFixed(1) + '%';
+  recallVal.innerText = (recall*100).toFixed(1) + '%';
+  f1Val.innerText = (f1*100).toFixed(1) + '%';
+
+  // set titles for accessibility
+  const rowsEls = confTable.querySelectorAll('tbody tr');
+  rowsEls.forEach((r,ri)=>{
+    r.querySelectorAll('td').forEach((cell,ci)=>{
+      const val = (axisOrder[ri] && axisOrder[ci]) ? matrix[ri][ci] : '';
+      if(ci < axisOrder.length){
+        if(val && val>0){
+          cell.title = `Actual: ${axisOrder[ri]}\nPredicted: ${axisOrder[ci]}\nCount: ${val}`;
+        } else {
+          cell.title = '';
+        }
+      } else {
+        cell.title = cell.innerText || '';
+      }
+    });
+  });
+}
+
+/* truncate words utility */
+function truncateWords(text, maxWords){
+  if(!text) return '';
+  const words = text.trim().split(/\s+/);
+  if(words.length <= maxWords) return text;
+  return words.slice(0, maxWords).join(' ') + ' ...';
+}
+
+/* escape html */
+function escapeHtml(str){
+  return (str+'').replace(/[&<>"']/g, function(m){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m];
+  });
+}
+
+/* Render records table with pagination and truncation */
+function renderRecordsTable(){
+  const filtered = getFilteredData();
+  const totalRecords = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + PAGE_SIZE);
+
+  movieTableBody.innerHTML = '';
+  pageRows.forEach((r, idx)=>{
+    const tr = document.createElement('tr');
+    const truncated = truncateWords(r.script, 40); // show first ~40 words
+    tr.innerHTML = `<td>${r.date}</td><td>${escapeHtml(r.movie_id || '')}</td><td class="summary-cell">${escapeHtml(truncated)}</td><td>${r.pred}</td><td>${r.judge}</td>`;
+    tr.addEventListener('click', ()=> openModal(r));
+    movieTableBody.appendChild(tr);
+  });
+  if(pageRows.length === 0){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="4" style="text-align:center;color:var(--muted);padding:14px;">No records match the filters</td>`;
+    movieTableBody.appendChild(tr);
+  }
+
+  // pagination UI
+  pageInfo.innerText = `Page ${currentPage} of ${totalPages} (${totalRecords} records)`;
+  prevPageBtn.disabled = currentPage <= 1;
+  nextPageBtn.disabled = currentPage >= totalPages;
+}
+
+/* open modal with full details */
+function openModal(record) {
+  modalTitle.innerText = `Record Details`;
+
+  // Keep meta simple (Date)
+  modalMeta.innerHTML = `<span>Date: ${escapeHtml(record.date)}</span>`;
+
+  // Modal body with side-by-side predictions + explanations
+  modalBody.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <strong>Movie ID:</strong>
+      <p style="margin:4px 0 0 16px;">${escapeHtml(record.movie_id || 'N/A')}</p>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <strong>Summary:</strong>
+      <p style="margin:4px 0 0 16px; line-height:1.45;">${escapeHtml(record.script)}</p>
+    </div>
+
+    <div style="display:flex; gap:30px; margin-top:12px;">
+      <div style="flex:1; border-right:1px solid #ddd; padding-right:12px;">
+        <strong>Prediction (LLM):</strong>
+        <p style="margin:6px 0 0 16px;">${escapeHtml(record.pred)}</p>
+        <p style="margin:8px 0 0 16px; color:#555; line-height:1.4;">
+          ${escapeHtml(record.explanation_prediction || '—')}
+        </p>
+      </div>
+      <div style="flex:1; padding-left:12px;">
+        <strong>Judge (LLM):</strong>
+        <p style="margin:6px 0 0 16px;">${escapeHtml(record.judge)}</p>
+        <p style="margin:8px 0 0 16px; color:#555; line-height:1.4;">
+          ${escapeHtml(record.explanation_judge || '—')}
+        </p>
+      </div>
+    </div>
+  `;
+
+  // Stamp setup (AGREE / DISAGREE)
+  const modal = document.querySelector('.modal');
+  const modalStamp = document.getElementById('modalStamp');
+  const closeBtn = document.getElementById('closeModal');
+
+  if (record.pred === record.judge) {
+    modalStamp.innerText = 'AGREE';
+    modalStamp.style.borderColor = 'rgba(34,139,34,0.8)';
+    modalStamp.style.color = 'rgba(34,139,34,0.8)';
+  } else {
+    modalStamp.innerText = 'DISAGREE';
+    modalStamp.style.borderColor = 'rgba(220,20,60,0.8)';
+    modalStamp.style.color = 'rgba(220,20,60,0.8)';
+  }
+
+  // Dynamically position the stamp relative to modal
+  const modalRect = modal.getBoundingClientRect();
+  const closeRect = closeBtn.getBoundingClientRect();
+
+  modalStamp.style.top = `${closeRect.bottom - modalRect.top + 125}px`;
+  modalStamp.style.right = `${modalRect.right - closeRect.right + 150}px`;
+  modalStamp.style.display = 'block';
+
+  // Show modal
+  modalBackdrop.style.display = 'flex';
+  modalBackdrop.setAttribute('aria-hidden', 'false');
+
+  // Focus on close button for accessibility
+  closeModalBtn.focus();
+}
+
+
+
+
+/* close modal */
+function closeModal(){
+  modalBackdrop.style.display = 'none';
+  modalBackdrop.setAttribute('aria-hidden','true');
+
+modalStamp.style.display = 'none';
+
+}
+
+/* Plot metrics over time (y-axis buffer up to 105) */
+function renderMetricsOverTime(){
+  const f = fromDate.value, t = toDate.value;
+  const allDates = uniqueSortedDates(allData);
+  const days = allDates.filter(d => d >= f && d <= t);
+  if(days.length === 0){
+    Plotly.react(trendChartDiv, [], {margin:{t:20,l:40,b:40}, yaxis:{range:[0,105], title:'%'}});
+    return;
+  }
+  const acc=[]; const prec=[]; const rec=[]; const f1arr=[];
+  days.forEach(day=>{
+    const dayRows = allData.filter(r=>r.date===day);
+    const {accuracy, precision, recall, f1} = computeMatrixAndMetrics(dayRows);
+    acc.push(+(accuracy*100).toFixed(1));
+    prec.push(+(precision*100).toFixed(1));
+    rec.push(+(recall*100).toFixed(1));
+    f1arr.push(+(f1*100).toFixed(1));
+  });
+
+  if(days.length === 1){
+    // grouped bar
+    const cat = ['Accuracy','Precision','Recall','F1'];
+    const vals = [acc[0], prec[0], rec[0], f1arr[0]];
+    Plotly.react(trendChartDiv, [{
+      x: cat, y: vals, type:'bar', marker:{color:['#16a34a','#06b6d4','#2563eb','#7c3aed']}, text: vals.map(v=>v + '%'), textposition:'auto'
+    }], {margin:{t:30,l:50,r:20,b:50}, yaxis:{range:[0,105], title:'%'}});
+  } else {
+    Plotly.react(trendChartDiv, [
+      {x:days, y:acc, type:'scatter', mode:'lines+markers', name:'Accuracy', line:{shape:'spline'}},
+      {x:days, y:prec, type:'scatter', mode:'lines+markers', name:'Precision', line:{shape:'spline'}},
+      {x:days, y:rec, type:'scatter', mode:'lines+markers', name:'Recall', line:{shape:'spline'}},
+      {x:days, y:f1arr, type:'scatter', mode:'lines+markers', name:'F1 Score', line:{shape:'spline'}}
+    ], {margin:{t:30,l:50,r:30,b:50}, yaxis:{range:[0,105], title:'%'}});
+  }
+}
+
+/* CSV download (filtered full data) */
+downloadBtn.addEventListener('click', ()=>{
+  const filtered = getFilteredData();
+  const headers = ['date','movie_id','script','pred','judge'];
+  const rows = filtered.map(r => headers.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
+  const csv = [headers.join(',')].concat(rows).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'filtered_records.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+/* All Days toggle */
+allToggle.addEventListener('change', ()=>{
+  const checked = allToggle.checked;
+  if(checked){
+    const dates = uniqueSortedDates(allData);
+    fromDate.value = dates[0];
+    toDate.value = dates[dates.length-1];
+    fromDate.setAttribute('disabled','');
+    toDate.setAttribute('disabled','');
+  } else {
+    fromDate.removeAttribute('disabled'); toDate.removeAttribute('disabled');
+  }
+  currentPage = 1;
+  rerenderAll();
+});
+
+/* filters change */
+[fromDate, toDate, predictedSelect, judgeSelect].forEach(el => {
+  el.addEventListener('change', () => {
+    if(fromDate.value > toDate.value) toDate.value = fromDate.value;
+    currentPage = 1;
+    rerenderAll();
+  });
+});
+
+/* pagination buttons */
+prevPageBtn.addEventListener('click', ()=>{
+  if(currentPage>1){ currentPage--; renderRecordsTable(); }
+});
+nextPageBtn.addEventListener('click', ()=>{
+  const total = getFilteredData().length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if(currentPage < totalPages){ currentPage++; renderRecordsTable(); }
+});
+
+/* modal events */
+closeModalBtn.addEventListener('click', closeModal);
+modalBackdrop.addEventListener('click', (e)=>{ if(e.target === modalBackdrop) closeModal(); });
+document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
+
+
+
+/* top-level rerender */
+function rerenderAll(){
+  renderConfMatrix();
+  renderRecordsTable();
+  renderMetricsOverTime();
+}
+
+/* initialize table of records (full list) for clicking; keep but we will re-render with pagination */
+function initMovieTableAllRows(){
+  // not used for final table - but keep as seed if needed
+}
+initMovieTableAllRows();
+
+/* Initial render */
+rerenderAll();
+
+</script>
+</body>
+</html>
